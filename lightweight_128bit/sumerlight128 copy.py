@@ -1,8 +1,7 @@
 import os
 import struct
-
+from typing import List
 from functools import reduce
-
 # Define the self-inverting matrix
 SELF_INVERTING_MATRIX = [
     [1, 1, 1, 0, 1, 0, 0, 0],
@@ -153,8 +152,8 @@ def main():
     main_key = os.urandom(16)  # Generate a 128-bit (16-byte) key
     round_keys = generate_round_keys(main_key)
     whitened = pre_whitening(plaintext, pre_whitening_key)
-
-    partialkeyxorinput = whitened ^ round_keys[0]
+    whitened_int = int.from_bytes(whitened,'big')
+    partialkeyxorinput = whitened_int ^ round_keys[0]
     encrypt(partialkeyxorinput, round_keys)
 
     print("Generated 14 Round Keys:")
@@ -195,13 +194,62 @@ def knight_shifting(input_128bit):
     return output_128bit
 
 
+# Function to convert the int state to matix
+# def int_to_state_matrix(state):
+#     if not(0<=state <(1<<128)):
+#         raise ValueError("NOT A 128 BIT INTEGER")
+    
+#     bytes_list = [(state >> (8*(15-i))) & 0xFF for i in range(16)]
+
+
+#     matrix = [[0] * 4 for _ in range(4)]
+
+#     for col in range(4):
+#         for row in range(4):
+#             matrix[row][col] = bytes_list[col * 4 + row]
+    
+#     return matrix
+def int_to_state_matrix(state):
+    bytes_list = [(state >> (8 * (15 - i))) & 0xFF for i in range(16)]
+    return [[bytes_list[r + 4 * c] for c in range(4)] for r in range(4)]
+
+def state_matrix_to_int(matrix):
+    flat = [matrix[r][c] for c in range(4) for r in range(4)]
+    return reduce(lambda acc, b: (acc << 8) | b, flat, 0)
+
+
+MIX_MATRIX = [
+    [0x04, 0x03, 0x05, 0x03],
+    [0x03, 0x04, 0x05, 0x05],
+    [0x05, 0x05, 0x04, 0x03],
+    [0x03, 0x05, 0x03, 0x04]
+]
+
+def mix_column(column: List[int]) -> List[int]:
+    
+    result = []
+    for row in MIX_MATRIX:
+        val = 0
+        for i in range(4):
+            val ^= gf_mult(row[i], column[i])
+        result.append(val)
+    return result
+
+def mix_state(state:List[List[int]])-> List[List[int]]:
+    tranponsed = list(zip(*state))
+    mixed_columns = [mix_column(list(col)) for col in tranponsed]
+
+    mixed_state = list(map(list,zip(*mixed_columns)))
+    return mixed_state
 
 def encrypt(partialkeyxorinput, round_keys):
     state = partialkeyxorinput  # Start with the pre-whitened input
     for i in range(1, 13):  # Runs 12 times (i = 1 to 12)
         state = on_the_fly_substitution(state)
         state = knight_shifting(state)
-        state = pbox_linear_transformation(state)
+        state = int_to_state_matrix(state)
+        state = mix_state(state)
+        state = state_matrix_to_int(state)
         state ^= round_keys[i]  # XOR with round-dependent partial key
 
     return state
